@@ -1,0 +1,9 @@
+.claude/
+output/
+__pycache__/
+
+INTERFACE_FEATURES.md
+START_HERE.md
+SYSTEM_ROADMAP.md
+USER_GUIDE.md
+QUICK_OVERVIEW.md
