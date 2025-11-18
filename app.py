@@ -15,6 +15,7 @@ from database import GlucoseDataFetcher
 from preprocessor import GlucosePreprocessor
 from predictor import GlucosePredictor
 from config import DB_CONFIG
+from medical_report import GlucoseReportGenerator
 
 # Page configuration
 st.set_page_config(
@@ -456,13 +457,116 @@ else:
 
                 # Download predictions
                 st.subheader("Download Predictions")
-                csv = future_pred.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Predictions (CSV)",
-                    data=csv,
-                    file_name=f"predictions_patient_{patient_id}_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
+
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    csv = future_pred.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download CSV",
+                        data=csv,
+                        file_name=f"predictions_patient_{patient_id}_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+
+                with col2:
+                    # Generate medical report button - PDF
+                    if st.button("📄 Generate Medical Report (PDF)", use_container_width=True):
+                        with st.spinner("Generating medical report..."):
+                            try:
+                                # Prepare predictions for report
+                                report_df = st.session_state.predictions.copy()
+                                report_df = report_df.rename(columns={
+                                    'timestamp': 'ds',
+                                    'predicted_glucose': 'yhat',
+                                    'lower_bound': 'yhat_lower',
+                                    'upper_bound': 'yhat_upper'
+                                })
+
+                                # Calculate statistics
+                                stats = {
+                                    'avg_glucose': future_pred['predicted_glucose'].mean(),
+                                    'min_glucose': future_pred['predicted_glucose'].min(),
+                                    'max_glucose': future_pred['predicted_glucose'].max(),
+                                    'std_glucose': future_pred['predicted_glucose'].std()
+                                }
+
+                                # Generate report
+                                report_gen = GlucoseReportGenerator(
+                                    patient_id=patient_id,
+                                    predictions_df=report_df[future_mask],
+                                    statistics=stats
+                                )
+
+                                pdf_filename = f"glucose_report_patient_{patient_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                                report_gen.generate_pdf_report(pdf_filename)
+
+                                # Read PDF and create download button
+                                with open(pdf_filename, "rb") as pdf_file:
+                                    pdf_bytes = pdf_file.read()
+
+                                st.download_button(
+                                    label="⬇️ Download PDF Report",
+                                    data=pdf_bytes,
+                                    file_name=pdf_filename,
+                                    mime="application/pdf",
+                                    use_container_width=True
+                                )
+
+                                st.success("✓ Medical report generated successfully!")
+
+                            except Exception as e:
+                                st.error(f"Error generating report: {str(e)}")
+
+                with col3:
+                    # Generate medical report button - HTML
+                    if st.button("🌐 Generate Medical Report (HTML)", use_container_width=True):
+                        with st.spinner("Generating HTML report..."):
+                            try:
+                                # Prepare predictions for report
+                                report_df = st.session_state.predictions.copy()
+                                report_df = report_df.rename(columns={
+                                    'timestamp': 'ds',
+                                    'predicted_glucose': 'yhat',
+                                    'lower_bound': 'yhat_lower',
+                                    'upper_bound': 'yhat_upper'
+                                })
+
+                                # Calculate statistics
+                                stats = {
+                                    'avg_glucose': future_pred['predicted_glucose'].mean(),
+                                    'min_glucose': future_pred['predicted_glucose'].min(),
+                                    'max_glucose': future_pred['predicted_glucose'].max(),
+                                    'std_glucose': future_pred['predicted_glucose'].std()
+                                }
+
+                                # Generate report
+                                report_gen = GlucoseReportGenerator(
+                                    patient_id=patient_id,
+                                    predictions_df=report_df[future_mask],
+                                    statistics=stats
+                                )
+
+                                html_filename = f"glucose_report_patient_{patient_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+                                report_gen.generate_html_report(html_filename)
+
+                                # Read HTML and create download button
+                                with open(html_filename, "r", encoding='utf-8') as html_file:
+                                    html_content = html_file.read()
+
+                                st.download_button(
+                                    label="⬇️ Download HTML Report",
+                                    data=html_content,
+                                    file_name=html_filename,
+                                    mime="text/html",
+                                    use_container_width=True
+                                )
+
+                                st.success("✓ HTML report generated successfully!")
+
+                            except Exception as e:
+                                st.error(f"Error generating report: {str(e)}")
 
     # Tab 3: Patterns
     with tab3:
