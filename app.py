@@ -56,6 +56,7 @@ if 'system_ready' not in st.session_state:
     st.session_state.anomalies = None
     st.session_state.predictions = None
     st.session_state.patient_id = 132
+    st.session_state.selected_algorithm = 'prophet'
 
 # Header
 st.markdown('<p class="main-header">🩸 Glucose Prediction System</p>', unsafe_allow_html=True)
@@ -63,6 +64,41 @@ st.markdown("---")
 
 # Sidebar
 with st.sidebar:
+    st.header("🤖 Algorithm Selection")
+
+    # Get all algorithms from predictor
+    temp_predictor = GlucosePredictor()
+    all_algorithms = temp_predictor.get_all_algorithms()
+
+    # Create algorithm options
+    algorithm_options = {
+        'prophet': '📈 Facebook Prophet',
+        'linear_regression': '📉 Linear Regression',
+        'ridge': '🔷 Ridge Regression',
+        'lasso': '🔶 Lasso Regression',
+        'random_forest': '🌲 Random Forest',
+        'gradient_boosting': '⚡ Gradient Boosting',
+        'xgboost': '🚀 XGBoost',
+        'svr': '🎯 Support Vector Regression',
+        'knn': '🔍 K-Nearest Neighbors',
+        'decision_tree': '🌳 Decision Tree'
+    }
+
+    selected_algo = st.selectbox(
+        "Select Prediction Algorithm",
+        options=list(algorithm_options.keys()),
+        format_func=lambda x: algorithm_options[x],
+        index=list(algorithm_options.keys()).index(st.session_state.selected_algorithm),
+        help="Choose the algorithm for glucose prediction"
+    )
+
+    # Update selected algorithm if changed
+    if selected_algo != st.session_state.selected_algorithm:
+        st.session_state.selected_algorithm = selected_algo
+        st.session_state.trained = False  # Retrain when algorithm changes
+
+    st.markdown("---")
+
     st.header("⚙️ Configuration")
 
     # Patient ID selection
@@ -122,17 +158,25 @@ with st.sidebar:
     # Train model button
     if st.session_state.system_ready:
         if st.button("🤖 Train Prediction Model", type="primary", use_container_width=True):
-            with st.spinner("Training AI model..."):
+            with st.spinner(f"Training {all_algorithms[st.session_state.selected_algorithm]['name']} model..."):
                 try:
-                    predictor = GlucosePredictor()
-                    predictor.train_prophet_model(st.session_state.cleaned_data)
+                    predictor = GlucosePredictor(algorithm=st.session_state.selected_algorithm)
 
-                    if len(st.session_state.featured_data.columns) > 1:
-                        predictor.train_ml_model(st.session_state.featured_data)
+                    # Train based on algorithm type
+                    if st.session_state.selected_algorithm == 'prophet':
+                        predictor.train_prophet_model(st.session_state.cleaned_data)
+                    else:
+                        # Train ML model with features
+                        if len(st.session_state.featured_data.columns) > 1:
+                            predictor.train_ml_model(st.session_state.featured_data)
+                        else:
+                            st.warning("Not enough features for ML model. Try Prophet instead.")
+                            predictor = None
 
-                    st.session_state.predictor = predictor
-                    st.session_state.trained = True
-                    st.success("✓ Model trained successfully!")
+                    if predictor is not None:
+                        st.session_state.predictor = predictor
+                        st.session_state.trained = True
+                        st.success(f"✓ {all_algorithms[st.session_state.selected_algorithm]['name']} model trained successfully!")
 
                 except Exception as e:
                     st.error(f"Error training model: {str(e)}")
@@ -154,21 +198,71 @@ with st.sidebar:
         """)
 
 # Main content area
+# Display algorithm information at the top
+st.header(f"📊 Selected Algorithm: {all_algorithms[st.session_state.selected_algorithm]['name']}")
+
+# Algorithm information card
+algo_info = all_algorithms[st.session_state.selected_algorithm]
+
+# Simple analogy at the top
+if 'simple_analogy' in algo_info:
+    st.info(f"**💡 Quick Understanding:** {algo_info['simple_analogy']}")
+
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.subheader("📖 About this Algorithm")
+    st.write(f"**Type:** {algo_info['type']}")
+    st.write(algo_info['description'])
+
+with col2:
+    st.subheader("🎯 Best Used For")
+    st.success(algo_info['best_for'])
+
+    st.subheader("🏷️ Algorithm Type")
+    if algo_info['type'] == 'Time Series':
+        st.success("⏱️ Time Series Model")
+    elif algo_info['type'] in ['Regression', 'Ensemble', 'Kernel-based', 'Instance-based', 'Tree-based']:
+        st.success(f"🔢 {algo_info['type']} Model")
+
+# Expandable detailed explanation
+with st.expander("🔍 How Does This Algorithm Work? (Click to see detailed explanation)", expanded=False):
+    if 'how_it_works' in algo_info:
+        st.markdown(algo_info['how_it_works'])
+    else:
+        st.write("Detailed explanation coming soon!")
+
+# Key advantages in a nice format
+st.subheader("✨ Key Advantages")
+cols = st.columns(2)
+for idx, advantage in enumerate(algo_info['advantages']):
+    with cols[idx % 2]:
+        st.markdown(f"✅ {advantage}")
+
+st.markdown("---")
+
 if not st.session_state.system_ready:
-    # Welcome screen
-    col1, col2, col3 = st.columns([1,2,1])
+    # Welcome screen with instructions
+    st.subheader("🚀 Getting Started")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("""
+        ### 1️⃣ Choose Algorithm
+        Select your preferred prediction algorithm from the sidebar.
+        Each algorithm has unique strengths.
+        """)
+
     with col2:
-        st.info("""
-        ### 👋 Welcome to the Glucose Prediction System
+        st.markdown("""
+        ### 2️⃣ Load Data
+        Enter a Patient ID and click "Load Patient Data" to fetch historical glucose readings.
+        """)
 
-        **Get Started:**
-        1. Enter a Patient ID in the sidebar (default: 132)
-        2. Click "Load Patient Data"
-        3. Click "Train Prediction Model"
-        4. Explore predictions and visualizations
-
-        The system will analyze historical glucose data, detect patterns and anomalies,
-        and predict future glucose levels with confidence intervals.
+    with col3:
+        st.markdown("""
+        ### 3️⃣ Train & Predict
+        Train the model and generate predictions with confidence intervals.
         """)
 
 else:
@@ -370,31 +464,85 @@ else:
                 future_mask = st.session_state.predictions['timestamp'] > last_date
                 future_pred = st.session_state.predictions[future_mask]
 
+                # User-friendly prediction summary
+                avg_pred = future_pred['predicted_glucose'].mean()
+                min_pred = future_pred['predicted_glucose'].min()
+                max_pred = future_pred['predicted_glucose'].max()
+
+                # Interpret the predictions
+                if 70 <= avg_pred <= 180:
+                    status_color = "green"
+                    status_text = "Good! Your predicted glucose levels are in the healthy range."
+                    status_icon = "✅"
+                elif avg_pred < 70:
+                    status_color = "red"
+                    status_text = "⚠️ Warning! Predictions show low glucose levels (hypoglycemia risk)."
+                    status_icon = "⚠️"
+                else:
+                    status_color = "orange"
+                    status_text = "⚠️ Caution! Predictions show elevated glucose levels."
+                    status_icon = "⚠️"
+
+                st.success(f"{status_icon} **Prediction Summary:** {status_text}")
+
+                # Simple explanation
+                with st.expander("📚 What do these predictions mean?", expanded=True):
+                    st.markdown(f"""
+                    ### Understanding Your Predictions
+
+                    The **{all_algorithms[st.session_state.selected_algorithm]['name']}** algorithm analyzed your glucose history and predicts:
+
+                    **What we predict:**
+                    - Your glucose will average around **{avg_pred:.0f} mg/dL** in the predicted period
+                    - Lowest expected: **{min_pred:.0f} mg/dL**
+                    - Highest expected: **{max_pred:.0f} mg/dL**
+
+                    **What this means in simple terms:**
+                    - 🟢 **Healthy range:** 70-180 mg/dL (target zone)
+                    - 🔴 **Too low:** Below 70 mg/dL (may feel dizzy, shaky)
+                    - 🟠 **Too high:** Above 180 mg/dL (increased thirst, frequent urination)
+
+                    **Confidence interval** (the shaded area in the chart):
+                    - Shows the range where your actual glucose is likely to fall
+                    - Wider band = more uncertainty
+                    - Narrower band = more confident prediction
+
+                    **Different algorithms give different predictions because:**
+                    - Prophet focuses on time patterns (daily/weekly cycles)
+                    - ML models (Random Forest, XGBoost, etc.) focus on complex relationships between factors
+                    - Each has strengths in different scenarios
+                    """)
+
                 # Prediction metrics
                 col1, col2, col3, col4 = st.columns(4)
 
                 with col1:
+                    delta_text = "Healthy" if 70 <= avg_pred <= 180 else ("Low" if avg_pred < 70 else "High")
                     st.metric(
                         "Predicted Average",
-                        f"{future_pred['predicted_glucose'].mean():.1f} mg/dL"
+                        f"{avg_pred:.1f} mg/dL",
+                        delta=delta_text
                     )
 
                 with col2:
                     st.metric(
                         "Predicted Min",
-                        f"{future_pred['predicted_glucose'].min():.1f} mg/dL"
+                        f"{min_pred:.1f} mg/dL",
+                        delta="Low Risk" if min_pred < 70 else "Safe"
                     )
 
                 with col3:
                     st.metric(
                         "Predicted Max",
-                        f"{future_pred['predicted_glucose'].max():.1f} mg/dL"
+                        f"{max_pred:.1f} mg/dL",
+                        delta="High Risk" if max_pred > 180 else "Safe"
                     )
 
                 with col4:
                     st.metric(
                         "Total Predictions",
-                        f"{len(future_pred):,}"
+                        f"{len(future_pred):,}",
+                        delta=f"Using {all_algorithms[st.session_state.selected_algorithm]['name']}"
                     )
 
                 # Prediction chart
