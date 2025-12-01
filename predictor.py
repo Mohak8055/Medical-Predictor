@@ -5,12 +5,14 @@ Glucose prediction module using multiple prediction algorithms
 import pandas as pd
 import numpy as np
 from prophet import Prophet
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, AdaBoostRegressor, HistGradientBoostingRegressor
+from lightgbm import LGBMRegressor
+from catboost import CatBoostRegressor
 from sklearn.linear_model import LinearRegression, Ridge, Lasso
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.svm import SVR
 from sklearn.neighbors import KNeighborsRegressor
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -21,15 +23,43 @@ except ImportError:
     XGBOOST_AVAILABLE = False
     print("Note: XGBoost not installed. Using alternatives.")
 
+# ADDED: Deep Learning Imports
+try:
+    import tensorflow as tf
+    from tensorflow.keras.models import Sequential
+    from tensorflow.keras.layers import LSTM, GRU, Dense, Dropout
+    from tensorflow.keras.optimizers import Adam
+    from tensorflow.keras.callbacks import EarlyStopping
+    DL_AVAILABLE = True
+except ImportError:
+    DL_AVAILABLE = False
+    print("Note: TensorFlow not installed. Deep Learning models unavailable.")
+
 
 class GlucosePredictor:
     """Handles glucose level predictions using multiple algorithms"""
+
+    # def __init__(self, algorithm='prophet'):
+    #     self.algorithm = algorithm
+    #     self.prophet_model = None
+    #     self.ml_model = None
+    #     self.scaler = StandardScaler()
+    #     self.training_data = None
+    #     self.feature_cols = None
 
     def __init__(self, algorithm='prophet'):
         self.algorithm = algorithm
         self.prophet_model = None
         self.ml_model = None
-        self.scaler = StandardScaler()
+        # Use MinMaxScaler for LSTMs (better for neural nets), StandardScaler for others
+        if algorithm in ['lstm', 'gru']:
+            self.scaler = MinMaxScaler()
+        else:
+            self.scaler = StandardScaler()
+            
+        # Separate scaler for the target variable (y) - Critical for LSTMs!
+        self.y_scaler = MinMaxScaler()
+        
         self.training_data = None
         self.feature_cols = None
 
@@ -75,6 +105,67 @@ Prophet analyzes your glucose history like a meteorologist studies weather patte
                 ],
                 'best_for': 'Time series data with strong seasonal patterns',
                 'simple_analogy': 'Like a smart calendar that learns your routine and predicts what will happen at specific times'
+            },
+            # ADDED: LSTM Algorithm Description
+            'lstm': {
+                'name': 'LSTM',
+                'type': 'Recurrent Neural Network',
+                'description': 'Long Short-Term Memory network. A type of deep learning model specifically designed to remember long-term patterns in time-series data.',
+                'how_it_works': 'LSTMs process data sequentially, keeping an internal "memory state" that can store information over long periods. Unlike standard regression, they can decide what to remember and what to forget from previous glucose readings.',
+                'advantages': ['Captures long-term dependencies', 'Great for complex sequential patterns', 'State-of-the-art for many time-series tasks'],
+                'best_for': 'Large datasets with complex historical patterns',
+                'simple_analogy': 'Like a doctor who remembers your entire medical history, not just your last visit.'
+            },
+
+            # ADD THIS BLOCK:
+            'lightgbm': {
+                'name': 'LightGBM',
+                'type': 'Ensemble',
+                'description': 'A gradient boosting framework that uses tree-based learning algorithms. It is designed to be distributed and efficient with fast training speed.',
+                'how_it_works': 'Unlike other boosting algorithms that grow trees level-wise, LightGBM grows trees leaf-wise. It chooses the leaf with max delta loss to grow, leading to lower loss.',
+                'advantages': ['Faster training speed and higher efficiency', 'Lower memory usage', 'Better accuracy than other boosting methods'],
+                'best_for': 'Large datasets and high-speed requirements',
+                'simple_analogy': 'Like a speed-reader who focuses only on the most important chapters of a book first.'
+            },
+            # ADD THIS BLOCK:
+            'catboost': {
+                'name': 'CatBoost',
+                'type': 'Ensemble',
+                'description': 'A high-performance open source library for gradient boosting on decision trees. It is known for its high quality without parameter tuning and robustness.',
+                'how_it_works': 'It builds symmetric decision trees. During training, it focuses on reducing "prediction shift" (a common issue in boosting) to provide more stable and accurate forecasts.',
+                'advantages': ['High accuracy', 'Robust to overfitting', 'Great defaults', 'Handles noisy data well'],
+                'best_for': 'Complex datasets where other models fail to generalize',
+                'simple_analogy': 'Like a wise teacher who corrects their own biases to give a fair grade.'
+            },
+            # ADD THIS BLOCK:
+            'adaboost': {
+                'name': 'AdaBoost',
+                'type': 'Ensemble',
+                'description': 'Adaptive Boosting. It fits a sequence of weak learners on repeatedly modified versions of the data.',
+                'how_it_works': 'Unlike Random Forest, which builds trees independent of each other, AdaBoost builds trees sequentially. Each new tree focuses on correcting the errors made by the previous trees.',
+                'advantages': ['Less prone to overfitting', 'Requires few parameters to tune', 'Improves accuracy of weak learners'],
+                'best_for': 'Focusing on "hard-to-predict" cases',
+                'simple_analogy': 'Like a student taking practice tests, but studying ONLY the questions they got wrong on the last test.'
+            },
+            # ADD THIS BLOCK:
+            'hist_gradient_boosting': {
+                'name': 'Hist. Gradient Boosting',
+                'type': 'Ensemble',
+                'description': 'Scikit-learn’s modern, optimized implementation of gradient boosting. It uses histogram-binning for speed and handles missing values natively.',
+                'how_it_works': 'It groups data points into "bins" (histograms) to find split points much faster. It uses a "leaf-wise" growth strategy similar to LightGBM.',
+                'advantages': ['Native handling of missing data', 'Much faster than standard GB', 'State-of-the-art accuracy'],
+                'best_for': 'Large datasets with missing values or noise',
+                'simple_analogy': 'A highly efficient organizer who groups detailed files into buckets to make decisions 10x faster.'
+            },
+            # ADDED: GRU Algorithm Description
+            'gru': {
+                'name': 'GRU',
+                'type': 'Recurrent Neural Network',
+                'description': 'Gated Recurrent Unit. A simplified, often faster version of LSTM that performs similarly well on smaller datasets.',
+                'how_it_works': 'Similar to LSTM but with a streamlined architecture. It uses "gates" to control the flow of information, balancing previous context with new input.',
+                'advantages': ['Faster training than LSTM', 'Often as accurate as LSTM', 'Efficient memory usage'],
+                'best_for': 'Medium-sized datasets needing deep learning power',
+                'simple_analogy': 'A "speed-reader" version of the LSTM doctor.'
             },
             'linear_regression': {
                 'name': 'Linear Regression',
@@ -452,7 +543,6 @@ KNN finds the K most similar past situations and averages their outcomes.
 Decision Tree makes predictions by asking a series of simple questions.
 
 **The Tree Structure:**
-```
 Start Here
    ↓
 Is it morning (Hour < 12)?
@@ -582,7 +672,60 @@ Is it morning (Hour < 12)?
         X_scaled = self.scaler.fit_transform(X)
 
         # Initialize model based on algorithm
-        if self.algorithm == 'linear_regression':
+        # ADDED: LSTM and GRU Training Logic
+        if self.algorithm in ['lstm', 'gru']:
+            if not DL_AVAILABLE:
+                raise ImportError("TensorFlow is required for LSTM/GRU. Please pip install tensorflow.")
+            
+            # --- 1. Scale the Target (y) to 0-1 range ---
+            y_reshaped = y.reshape(-1, 1)
+            y_scaled = self.y_scaler.fit_transform(y_reshaped)
+            
+            # --- 2. Reshape Inputs ---
+            X_reshaped = X_scaled.reshape((X_scaled.shape[0], 1, X_scaled.shape[1]))
+            
+            model = Sequential()
+            
+            # --- 3. Improved Deep Network Architecture ---
+            if self.algorithm == 'lstm':
+                # Layer 1: 128 units + Return Sequences
+                model.add(LSTM(128, return_sequences=True, input_shape=(1, X_scaled.shape[1])))
+                model.add(Dropout(0.2))
+                # Layer 2: 64 units
+                model.add(LSTM(64, return_sequences=False))
+            else: # gru
+                model.add(GRU(128, return_sequences=True, input_shape=(1, X_scaled.shape[1])))
+                model.add(Dropout(0.2))
+                model.add(GRU(64, return_sequences=False))
+                
+            model.add(Dropout(0.2))
+            model.add(Dense(32, activation='relu'))
+            model.add(Dense(1)) # Output layer
+            
+            # --- 4. Slower Learning Rate for stability ---
+            model.compile(optimizer=Adam(learning_rate=0.0005), loss='mse')
+            
+            # --- 5. Train with Early Stopping ---
+            print(f"  Training Deep Learning model ({self.algorithm})...")
+            early_stop = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
+            
+            # FIT ON SCALED TARGET (y_scaled)
+            model.fit(X_reshaped, y_scaled, epochs=100, batch_size=32, verbose=0, callbacks=[early_stop])
+            
+            self.ml_model = model
+            
+            # --- 6. Calculate Score (Inverse Transform first) ---
+            train_pred_scaled = model.predict(X_reshaped, verbose=0)
+            train_pred = self.y_scaler.inverse_transform(train_pred_scaled).flatten()
+            
+            from sklearn.metrics import r2_score
+            train_score = r2_score(y, train_pred)
+            print(f"  Model trained (R² score: {train_score:.4f})")
+            
+            self.training_data = df
+            return self.ml_model
+
+        elif self.algorithm == 'linear_regression':
             self.ml_model = LinearRegression()
         elif self.algorithm == 'ridge':
             self.ml_model = Ridge(alpha=1.0, random_state=42)
@@ -620,6 +763,44 @@ Is it morning (Hour < 12)?
                     learning_rate=0.1,
                     random_state=42
                 )
+        # ADD THIS BLOCK:
+        elif self.algorithm == 'lightgbm':
+            self.ml_model = LGBMRegressor(
+                n_estimators=100,
+                learning_rate=0.1,
+                max_depth=20,
+                random_state=42,
+                n_jobs=-1,
+                verbose=-1
+            )
+        # ... inside train_ml_model ...
+        elif self.algorithm == 'adaboost':
+            self.ml_model = AdaBoostRegressor(
+                n_estimators=100,
+                learning_rate=0.1,
+                random_state=42
+            )
+
+        # ADD THIS BLOCK:
+        elif self.algorithm == 'catboost':
+            self.ml_model = CatBoostRegressor(
+                iterations=500,
+                learning_rate=0.05,
+                depth=6,
+                random_seed=42,
+                verbose=0  # Silent training
+            )
+
+        elif self.algorithm == 'hist_gradient_boosting':
+            self.ml_model = HistGradientBoostingRegressor(
+                max_iter=100,
+                learning_rate=0.1,
+                max_depth=20,
+                random_state=42,
+                early_stopping=True
+            )
+            
+
         elif self.algorithm == 'svr':
             self.ml_model = SVR(kernel='rbf', C=1.0, epsilon=0.1)
         elif self.algorithm == 'knn':
@@ -734,9 +915,19 @@ Is it morning (Hour < 12)?
 
             # Scale features
             X_future_scaled = self.scaler.transform(X_future)
-
-            # Make predictions
-            y_pred = self.ml_model.predict(X_future_scaled)
+# Make predictions
+            # ADDED: LSTM and GRU Prediction Logic
+            if self.algorithm in ['lstm', 'gru']:
+                # Reshape for DL
+                X_future_reshaped = X_future_scaled.reshape((X_future_scaled.shape[0], 1, X_future_scaled.shape[1]))
+                
+                # Predict (Result is 0-1 because of MinMaxScaler)
+                y_pred_scaled = self.ml_model.predict(X_future_reshaped, verbose=0)
+                
+                # CRITICAL FIX: Un-scale result back to real glucose values (e.g. 0.5 -> 120)
+                y_pred = self.y_scaler.inverse_transform(y_pred_scaled).flatten()
+            else:
+                y_pred = self.ml_model.predict(X_future_scaled)
 
             # Create predictions dataframe
             predictions = pd.DataFrame({

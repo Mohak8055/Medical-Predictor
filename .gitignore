@@ -11,3 +11,5 @@ MEDICAL_REPORT_FEATURE.md
 
 *.pdf
 *.html
+venv/
+catboost_info/

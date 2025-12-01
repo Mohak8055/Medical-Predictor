@@ -74,7 +74,13 @@ with st.sidebar:
     algorithm_options = {
         'prophet': '📈 Facebook Prophet',
         'linear_regression': '📉 Linear Regression',
+        'lstm': '🧠 LSTM',    # <--- NEW
+        'gru': '⚡ GRU',      # new
+        'hist_gradient_boosting': '📊 Hist. Gradient Boosting',
+        'catboost': '🐱 CatBoost',
+        'adaboost': '📈 AdaBoost',
         'ridge': '🔷 Ridge Regression',
+        'lightgbm': '🚀 LightGBM',
         'lasso': '🔶 Lasso Regression',
         'random_forest': '🌲 Random Forest',
         'gradient_boosting': '⚡ Gradient Boosting',
