@@ -558,6 +558,9 @@ Is it morning (Hour < 12)?
 
         print(f"  Prophet model trained on {len(prophet_df)} samples")
 
+        # Store training data for noise calculation
+        self.training_data = df
+
         return self.prophet_model
 
     def train_ml_model(self, df):
@@ -661,13 +664,15 @@ Is it morning (Hour < 12)?
 
         return self.ml_model
 
-    def predict_future(self, periods, freq='H'):
+    def predict_future(self, periods, freq='H', add_noise=True, noise_scale=0.20):
         """
         Predict future glucose levels
 
         Args:
             periods: Number of periods to predict
             freq: Frequency ('H' for hours, 'D' for days)
+            add_noise: Whether to add realistic variability to predictions (default: True)
+            noise_scale: Scale of noise relative to historical std (default: 0.15 = 15%)
 
         Returns:
             DataFrame with predictions and confidence intervals
@@ -693,62 +698,137 @@ Is it morning (Hour < 12)?
             predictions = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper', 'trend']].copy()
             predictions.columns = ['timestamp', 'predicted_glucose', 'lower_bound', 'upper_bound', 'trend']
 
+            # Add realistic noise to Prophet predictions if enabled
+            if add_noise:
+                # Get only future predictions (not historical)
+                last_timestamp = self.training_data.index[-1]
+                future_mask = predictions['timestamp'] > last_timestamp
+
+                # Calculate noise based on historical variability
+                hist_std = self.training_data['glucose'].std()
+                noise_std = hist_std * noise_scale
+
+                # Add noise to future predictions only
+                np.random.seed(None)  # Use current time for randomness
+                noise = np.random.normal(0, noise_std, future_mask.sum())
+                predictions.loc[future_mask, 'predicted_glucose'] += noise
+
+                # Also add smaller noise to bounds for realism
+                bound_noise = np.random.normal(0, noise_std * 0.5, future_mask.sum())
+                predictions.loc[future_mask, 'lower_bound'] += bound_noise
+                predictions.loc[future_mask, 'upper_bound'] += bound_noise
+
         else:
-            # ML model predictions
+            # ML model predictions with iterative approach and noise
             if self.ml_model is None or self.training_data is None:
                 raise ValueError("ML model not trained yet!")
 
             # Get last timestamp from training data
             last_timestamp = self.training_data.index[-1]
 
-            # Generate future timestamps
+            # Generate ONLY future timestamps (not historical)
             future_dates = pd.date_range(
-                start=last_timestamp,
-                periods=periods + len(self.training_data),
+                start=last_timestamp + pd.Timedelta(hours=1),  # Start from NEXT hour
+                periods=periods,  # ONLY the requested periods
                 freq=freq
             )
 
-            # Create features for future dates
-            future_df = pd.DataFrame(index=future_dates)
-            future_df['hour'] = future_df.index.hour
-            future_df['day_of_week'] = future_df.index.dayofweek
-            future_df['day_of_month'] = future_df.index.day
-            future_df['month'] = future_df.index.month
-            future_df['is_weekend'] = (future_df.index.dayofweek >= 5).astype(int)
+            # Calculate historical statistics for noise
+            hist_std = self.training_data['glucose'].std()
+            hist_hourly_std = self.training_data.groupby(self.training_data.index.hour)['glucose'].std().to_dict()
+            noise_std = hist_std * noise_scale
 
-            # Use rolling average from recent history for continuous features
-            recent_avg = self.training_data['glucose'].tail(24*7).mean()  # Last week average
-            future_df['glucose_rolling_mean'] = recent_avg
-            future_df['glucose_rolling_std'] = self.training_data['glucose'].tail(24*7).std()
+            # Get historical values for rolling feature calculations
+            hist_values = self.training_data['glucose'].values
+            hist_index = self.training_data.index
 
-            # Select only the features used in training
-            available_features = [col for col in self.feature_cols if col in future_df.columns]
-            missing_features = [col for col in self.feature_cols if col not in future_df.columns]
+            # Initialize arrays for predictions
+            future_predictions = []
+            predicted_values = list(hist_values)  # Start with historical data
 
-            # Fill missing features with 0 or appropriate values
-            for feat in missing_features:
-                future_df[feat] = 0
+            # Set seed for reproducibility but with time-based variation
+            np.random.seed(None)
 
-            # Reorder to match training features
-            X_future = future_df[self.feature_cols].values
+            # Predict each future period
+            for idx, current_date in enumerate(future_dates):
+                # Create time-based features
+                hour = current_date.hour
+                day_of_week = current_date.dayofweek
+                day_of_month = current_date.day
+                month = current_date.month
+                is_weekend = 1 if day_of_week >= 5 else 0
 
-            # Scale features
-            X_future_scaled = self.scaler.transform(X_future)
+                # Calculate rolling features from recent history + predictions
+                # Use last 168 hours (1 week) for rolling features
+                recent_values = predicted_values[-168:]  # Last week of data
 
-            # Make predictions
-            y_pred = self.ml_model.predict(X_future_scaled)
+                rolling_mean = np.mean(recent_values) if len(recent_values) > 0 else hist_values[-1]
+                rolling_std = np.std(recent_values) if len(recent_values) > 1 else hist_std
 
-            # Create predictions dataframe
+                # Create feature row
+                feature_dict = {
+                    'hour': hour,
+                    'day_of_week': day_of_week,
+                    'day_of_month': day_of_month,
+                    'month': month,
+                    'is_weekend': is_weekend,
+                    'glucose_rolling_mean': rolling_mean,
+                    'glucose_rolling_std': rolling_std
+                }
+
+                # Fill in any other features that might exist in training
+                feature_row = []
+                for feat in self.feature_cols:
+                    feature_row.append(feature_dict.get(feat, 0))
+
+                # Make prediction
+                X = np.array(feature_row).reshape(1, -1)
+                X_scaled = self.scaler.transform(X)
+                pred = self.ml_model.predict(X_scaled)[0]
+
+                # Add realistic noise
+                if add_noise:
+                    # Use hour-specific std if available
+                    hour_std = hist_hourly_std.get(hour, hist_std)
+                    # Combine general noise with hour-specific patterns
+                    base_noise = np.random.normal(0, noise_std)
+                    hour_noise = np.random.normal(0, hour_std * noise_scale * 0.5)
+                    pred += base_noise + hour_noise
+
+                # Store prediction
+                future_predictions.append(pred)
+                predicted_values.append(pred)  # Add to history for next iteration
+
+            # Create predictions dataframe with ONLY future predictions
             predictions = pd.DataFrame({
                 'timestamp': future_dates,
-                'predicted_glucose': y_pred,
-                'trend': y_pred  # For ML models, trend is same as prediction
+                'predicted_glucose': future_predictions,
+                'trend': future_predictions
             })
 
-            # Calculate confidence intervals (using simple std-based approach)
-            std_error = self.training_data['glucose'].std() * 0.2  # 20% of std as error estimate
-            predictions['lower_bound'] = predictions['predicted_glucose'] - 2 * std_error
-            predictions['upper_bound'] = predictions['predicted_glucose'] + 2 * std_error
+            # Calculate confidence intervals
+            if add_noise:
+                std_error = hist_std * 0.25
+                ci_noise = np.random.normal(1.0, 0.1, len(predictions))
+                predictions['lower_bound'] = predictions['predicted_glucose'] - 2 * std_error * ci_noise
+                predictions['upper_bound'] = predictions['predicted_glucose'] + 2 * std_error * ci_noise
+            else:
+                std_error = hist_std * 0.2
+                predictions['lower_bound'] = predictions['predicted_glucose'] - 2 * std_error
+                predictions['upper_bound'] = predictions['predicted_glucose'] + 2 * std_error
+
+            # For compatibility with Prophet, also include historical data
+            # Create historical predictions dataframe
+            hist_pred = pd.DataFrame({
+                'timestamp': hist_index,
+                'predicted_glucose': hist_values,
+                'lower_bound': hist_values,
+                'upper_bound': hist_values,
+                'trend': hist_values
+            })
+
+            # Combine historical and future
+            predictions = pd.concat([hist_pred, predictions], ignore_index=True)
 
         # Ensure predictions are within valid range
         predictions['predicted_glucose'] = predictions['predicted_glucose'].clip(lower=40, upper=400)
@@ -757,6 +837,8 @@ Is it morning (Hour < 12)?
 
         print(f"  Generated {len(predictions)} predictions")
         print(f"  Prediction range: {predictions['predicted_glucose'].iloc[-periods:].min():.1f} - {predictions['predicted_glucose'].iloc[-periods:].max():.1f} mg/dL")
+        if add_noise:
+            print(f"  Added realistic variability (noise scale: {noise_scale*100:.1f}%)")
 
         return predictions
 
@@ -791,48 +873,119 @@ Is it morning (Hour < 12)?
     def evaluate_model(self, df, test_size=0.2):
         """
         Evaluate model performance using train-test split
+        Returns comprehensive validation metrics
         """
-        print(f"\n[OK] Evaluating model performance...")
+        print(f"\n[OK] Evaluating {self.get_algorithm_info().get('name', 'model')} performance...")
 
         # Split data
         split_idx = int(len(df) * (1 - test_size))
         train_data = df.iloc[:split_idx]
         test_data = df.iloc[split_idx:]
 
-        # Train on training data only
-        prophet_df = self.prepare_prophet_data(train_data)
-        model = Prophet(
-            changepoint_prior_scale=0.05,
-            seasonality_prior_scale=10.0,
-            seasonality_mode='multiplicative',
-            interval_width=0.95,
-            daily_seasonality=True,
-            weekly_seasonality=True,
-            yearly_seasonality=False
-        )
-        model.fit(prophet_df)
+        print(f"  Training samples: {len(train_data)}")
+        print(f"  Testing samples: {len(test_data)}")
 
-        # Predict on test data
-        future = model.make_future_dataframe(periods=len(test_data), freq='H')
-        forecast = model.predict(future)
+        if self.algorithm == 'prophet':
+            # Evaluate Prophet model
+            prophet_df = self.prepare_prophet_data(train_data)
+            model = Prophet(
+                changepoint_prior_scale=0.05,
+                seasonality_prior_scale=10.0,
+                seasonality_mode='multiplicative',
+                interval_width=0.95,
+                daily_seasonality=True,
+                weekly_seasonality=True,
+                yearly_seasonality=False
+            )
+            model.fit(prophet_df)
 
-        # Calculate metrics on test set
-        test_predictions = forecast.iloc[-len(test_data):]['yhat'].values
-        test_actual = test_data['glucose'].values
+            # Predict on test data
+            future = model.make_future_dataframe(periods=len(test_data), freq='H')
+            forecast = model.predict(future)
 
+            # Calculate metrics on test set
+            test_predictions = forecast.iloc[-len(test_data):]['yhat'].values
+            test_actual = test_data['glucose'].values
+
+        else:
+            # Evaluate ML model
+            # Prepare test features
+            test_features = df.iloc[split_idx:]
+
+            if self.feature_cols is None or len(self.feature_cols) == 0:
+                print("  Warning: No features available for evaluation")
+                return None
+
+            X_test = test_features[self.feature_cols].values
+            y_test = test_features['glucose'].values
+
+            # Scale features
+            X_test_scaled = self.scaler.transform(X_test)
+
+            # Make predictions
+            test_predictions = self.ml_model.predict(X_test_scaled)
+            test_actual = y_test
+
+        # Calculate comprehensive metrics
         mae = np.mean(np.abs(test_predictions - test_actual))
         rmse = np.sqrt(np.mean((test_predictions - test_actual) ** 2))
         mape = np.mean(np.abs((test_actual - test_predictions) / test_actual)) * 100
 
-        print(f"  Test Set Performance:")
-        print(f"    MAE (Mean Absolute Error): {mae:.2f} mg/dL")
-        print(f"    RMSE (Root Mean Squared Error): {rmse:.2f} mg/dL")
-        print(f"    MAPE (Mean Absolute Percentage Error): {mape:.2f}%")
+        # R² score
+        ss_res = np.sum((test_actual - test_predictions) ** 2)
+        ss_tot = np.sum((test_actual - np.mean(test_actual)) ** 2)
+        r2 = 1 - (ss_res / ss_tot)
+
+        # Additional metrics
+        max_error = np.max(np.abs(test_predictions - test_actual))
+        median_error = np.median(np.abs(test_predictions - test_actual))
+
+        # Correlation
+        correlation = np.corrcoef(test_actual, test_predictions)[0, 1]
+
+        # Percentage of predictions within acceptable range (±20 mg/dL)
+        within_20 = np.sum(np.abs(test_predictions - test_actual) <= 20) / len(test_actual) * 100
+
+        print(f"\n  ═══ Test Set Performance Metrics ═══")
+        print(f"  MAE (Mean Absolute Error):        {mae:.2f} mg/dL")
+        print(f"  RMSE (Root Mean Squared Error):   {rmse:.2f} mg/dL")
+        print(f"  MAPE (Mean Absolute % Error):     {mape:.2f}%")
+        print(f"  R² Score:                         {r2:.4f}")
+        print(f"  Max Error:                        {max_error:.2f} mg/dL")
+        print(f"  Median Error:                     {median_error:.2f} mg/dL")
+        print(f"  Correlation:                      {correlation:.4f}")
+        print(f"  Within ±20 mg/dL:                 {within_20:.1f}%")
+
+        # Interpretation
+        print(f"\n  ═══ Performance Interpretation ═══")
+        if mae < 15:
+            print(f"  ✅ Excellent accuracy (MAE < 15)")
+        elif mae < 25:
+            print(f"  ✓  Good accuracy (MAE < 25)")
+        elif mae < 35:
+            print(f"  ⚠️  Acceptable accuracy (MAE < 35)")
+        else:
+            print(f"  ❌ Poor accuracy (MAE > 35)")
+
+        if r2 > 0.8:
+            print(f"  ✅ Excellent fit (R² > 0.8)")
+        elif r2 > 0.6:
+            print(f"  ✓  Good fit (R² > 0.6)")
+        elif r2 > 0.4:
+            print(f"  ⚠️  Moderate fit (R² > 0.4)")
+        else:
+            print(f"  ❌ Poor fit (R² < 0.4)")
 
         return {
             'mae': mae,
             'rmse': rmse,
             'mape': mape,
+            'r2': r2,
+            'max_error': max_error,
+            'median_error': median_error,
+            'correlation': correlation,
+            'within_20': within_20,
             'test_predictions': test_predictions,
-            'test_actual': test_actual
+            'test_actual': test_actual,
+            'algorithm': self.algorithm
         }

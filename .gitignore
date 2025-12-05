@@ -1,6 +1,7 @@
 .claude/
 output/
 __pycache__/
+venv/
 
 INTERFACE_FEATURES.md
 START_HERE.md
@@ -8,6 +9,11 @@ SYSTEM_ROADMAP.md
 USER_GUIDE.md
 QUICK_OVERVIEW.md
 MEDICAL_REPORT_FEATURE.md
+FIXES_SUMMARY.md
+VARIABILITY_GUIDE.md
 
 *.pdf
 *.html
+*.csv
+
+.gitignore

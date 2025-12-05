@@ -120,7 +120,7 @@ with st.sidebar:
     st.markdown("---")
 
     # Load data button
-    if st.button("📥 Load Patient Data", type="primary", use_container_width=True):
+    if st.button("📥 Load Patient Data", type="primary", width='stretch'):
         with st.spinner(f"Loading data for Patient {patient_id}..."):
             try:
                 # Initialize components
@@ -157,7 +157,7 @@ with st.sidebar:
 
     # Train model button
     if st.session_state.system_ready:
-        if st.button("🤖 Train Prediction Model", type="primary", use_container_width=True):
+        if st.button("🤖 Train Prediction Model", type="primary", width='stretch'):
             with st.spinner(f"Training {all_algorithms[st.session_state.selected_algorithm]['name']} model..."):
                 try:
                     predictor = GlucosePredictor(algorithm=st.session_state.selected_algorithm)
@@ -342,7 +342,7 @@ else:
             height=400
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
         # Statistics
         col1, col2 = st.columns(2)
@@ -359,7 +359,7 @@ else:
                     f"{st.session_state.cleaned_data['glucose'].max():.1f} mg/dL"
                 ]
             })
-            st.dataframe(stats_df, hide_index=True, use_container_width=True)
+            st.dataframe(stats_df, hide_index=True, width='stretch')
 
         with col2:
             st.subheader("Time in Range Breakdown")
@@ -378,7 +378,7 @@ else:
                 ],
                 'Hours': [f"{below:,}", f"{in_range_count:,}", f"{above:,}"]
             })
-            st.dataframe(range_df, hide_index=True, use_container_width=True)
+            st.dataframe(range_df, hide_index=True, width='stretch')
 
     # Tab 2: Predictions
     with tab2:
@@ -601,7 +601,7 @@ else:
                     height=500
                 )
 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
 
                 # Download predictions
                 st.subheader("Download Predictions")
@@ -615,12 +615,12 @@ else:
                         data=csv,
                         file_name=f"predictions_patient_{patient_id}_{datetime.now().strftime('%Y%m%d')}.csv",
                         mime="text/csv",
-                        use_container_width=True
+                        width='stretch'
                     )
 
                 with col2:
                     # Generate medical report button - PDF
-                    if st.button("📄 Generate Medical Report (PDF)", use_container_width=True):
+                    if st.button("📄 Generate Medical Report (PDF)", width='stretch'):
                         with st.spinner("Generating medical report..."):
                             try:
                                 # Prepare predictions for report
@@ -659,7 +659,7 @@ else:
                                     data=pdf_bytes,
                                     file_name=pdf_filename,
                                     mime="application/pdf",
-                                    use_container_width=True
+                                    width='stretch'
                                 )
 
                                 st.success("✓ Medical report generated successfully!")
@@ -669,7 +669,7 @@ else:
 
                 with col3:
                     # Generate medical report button - HTML
-                    if st.button("🌐 Generate Medical Report (HTML)", use_container_width=True):
+                    if st.button("🌐 Generate Medical Report (HTML)", width='stretch'):
                         with st.spinner("Generating HTML report..."):
                             try:
                                 # Prepare predictions for report
@@ -708,7 +708,7 @@ else:
                                     data=html_content,
                                     file_name=html_filename,
                                     mime="text/html",
-                                    use_container_width=True
+                                    width='stretch'
                                 )
 
                                 st.success("✓ HTML report generated successfully!")
@@ -767,7 +767,7 @@ else:
                 xaxis=dict(tickmode='linear', tick0=0, dtick=2),
                 height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
             # Peak/lowest hours
             peak_hour = hourly_avg['mean'].idxmax()
@@ -799,7 +799,7 @@ else:
                 yaxis_title="Average Glucose (mg/dL)",
                 height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
             # Highest/lowest days
             highest_day_idx = daily_avg['mean'].idxmax()
@@ -832,7 +832,7 @@ else:
             yaxis_title="Frequency",
             height=400
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     # Tab 4: Anomalies
     with tab4:
@@ -879,7 +879,7 @@ else:
             display_cols = ['timestamp', 'value'] if 'value' in selected_anomalies.columns else list(selected_anomalies.columns[:5])
             st.dataframe(
                 selected_anomalies[display_cols].head(100),
-                use_container_width=True,
+                width='stretch',
                 height=300
             )
 
@@ -913,7 +913,7 @@ else:
             display_data = st.session_state.raw_data
 
         # Show data
-        st.dataframe(display_data, use_container_width=True, height=500)
+        st.dataframe(display_data, width='stretch', height=500)
 
         # Download data
         csv = display_data.to_csv(index=False)
